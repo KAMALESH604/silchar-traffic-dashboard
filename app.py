@@ -141,6 +141,42 @@ def flows_for(key, pts):
 
 KEY = api_key()
 
+
+@st.cache_data(ttl=60, show_spinner=False)
+def check_key(key):
+    """Plain-language test of each TomTom service the dashboard uses."""
+    if not key:
+        return [("Key", False, "No key found. Add TOMTOM_API_KEY in Streamlit Settings > Secrets, then reboot.")]
+    tests = [
+        ("Traffic API", "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json",
+         {"point": "24.7577,92.7923", "unit": "KMPH", "key": key}),
+        ("Routing API", "https://api.tomtom.com/routing/1/calculateRoute/24.7577,92.7923:24.7825,92.7958/json",
+         {"key": key, "traffic": "true"}),
+    ]
+    out = []
+    for name, url, params in tests:
+        try:
+            r = requests.get(url, params=params, timeout=8)
+            c = r.status_code
+            if c == 200:
+                out.append((name, True, "working"))
+            elif c in (401, 403):
+                out.append((name, False, f"key rejected (HTTP {c}). Re-copy the key and tick {name} for it in the TomTom dashboard."))
+            elif c == 429:
+                out.append((name, False, "daily limit reached (HTTP 429)"))
+            else:
+                out.append((name, False, f"HTTP {c}: {r.text[:100]}"))
+        except Exception as e:
+            out.append((name, False, f"could not reach TomTom ({type(e).__name__})"))
+    return out
+
+
+st.sidebar.header("🔌 Connection")
+for _n, _ok, _msg in check_key(KEY):
+    st.sidebar.markdown(f"{'✅' if _ok else '❌'} **{_n}:** {_msg}")
+if KEY:
+    st.sidebar.caption(f"Key loaded: {len(KEY)} characters, ending ...{KEY[-4:]}")
+
 # ----------------------------------------------------------------------------- header
 h1, h2 = st.columns([3, 1])
 with h1:
@@ -195,7 +231,7 @@ def live_monitor():
 
     a, b = st.columns([1.3, 1])
     with a:
-        mp = folium.Map(location=[24.785, 92.795], zoom_start=12, tiles="CartoDB dark_matter")
+        mp = folium.Map(location=[24.785, 92.795], zoom_start=12, tiles="OpenStreetMap")
         for n, f in ok:
             r = f["cur"] / max(f["free"], 1)
             folium.CircleMarker(PLACES[n], radius=14, color=ratio_color(r), fill=True, fill_opacity=0.85,
@@ -268,7 +304,7 @@ def route_planner():
 
     a, b = st.columns([1.7, 1])
     with a:
-        mp = folium.Map(location=[(o[0] + d[0]) / 2, (o[1] + d[1]) / 2], zoom_start=13, tiles="CartoDB dark_matter")
+        mp = folium.Map(location=[(o[0] + d[0]) / 2, (o[1] + d[1]) / 2], zoom_start=13, tiles="OpenStreetMap")
         for r in routes[1:]:
             folium.PolyLine(r["pts"], color="#94A3B8", weight=5, opacity=0.8, dash_array="8,8",
                             tooltip=f"Alternative: {r['km']:.1f} km, {r['sec'] / 60:.0f} min").add_to(mp)
